@@ -1,0 +1,547 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Live traffic · Lab 4 proxy</title>
+<style>
+:root {
+  --bg: #f5f6f8; --card: #ffffff; --ink: #1c2230; --muted: #5b6474; --line: #d8dde6;
+  --sys: #2452b5;   --sys-bg: #e9f0fc;
+  --tools: #6436b0; --tools-bg: #f2ecfc;
+  --conv: #4a5260;  --conv-bg: #f0f2f5;
+  --new: #8a5300;   --new-bg: #fff3d6;
+  --call: #0c6f68;  --call-bg: #e5f6f3;
+  --res: #2b6f2b;   --res-bg: #e9f6e9;
+  --err: #b42318;   --err-bg: #fdecea;
+  --warn: #7a5a00;  --warn-bg: #fff8e1;
+  --plain: #4a5260; --plain-bg: #fafbfc;
+  --k: #0b5cad; --s: #17703a; --n: #a4480b; --b: #8a1c7c;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f1216; --card: #171b21; --ink: #e6e9ef; --muted: #9aa3b2; --line: #2c333d;
+    --sys: #8fb4ff;   --sys-bg: #141f33;
+    --tools: #c5aaff; --tools-bg: #211a33;
+    --conv: #b3bccb;  --conv-bg: #1b2028;
+    --new: #ffcf70;   --new-bg: #2e2510;
+    --call: #66d6c8;  --call-bg: #0f2b28;
+    --res: #86d89a;   --res-bg: #132617;
+    --err: #ff8a80;   --err-bg: #3a1714;
+    --warn: #ffd27a;  --warn-bg: #2e2710;
+    --plain: #b3bccb; --plain-bg: #14181e;
+    --k: #7cc0ff; --s: #9be7b0; --n: #ffb07a; --b: #e29ce6;
+  }
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { margin: 0; background: var(--bg); color: var(--ink); }
+body { font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+.wrap { max-width: 1120px; margin: 0 auto; padding: 0 16px 80px; min-width: 0; }
+button, select { font: inherit; color: var(--ink); background: var(--card); border: 1px solid var(--line); border-radius: 6px; padding: 4px 10px; cursor: pointer; }
+button[aria-pressed="true"] { background: var(--ink); color: var(--bg); }
+.muted { color: var(--muted); }
+.pending { color: var(--warn); font-style: italic; }
+
+/* top bar */
+header.top { position: sticky; top: 0; z-index: 10; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 10px 0; background: var(--bg); border-bottom: 1px solid var(--line); }
+h1 { font-size: 17px; margin: 0 6px 0 0; }
+.seg { display: inline-flex; }
+.seg button { border-radius: 0; }
+.seg button:first-child { border-radius: 6px 0 0 6px; }
+.seg button:last-child { border-radius: 0 6px 6px 0; margin-left: -1px; }
+.fl { display: inline-flex; gap: 6px; align-items: center; color: var(--muted); }
+.pill { padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; border: 1px solid var(--line); }
+.pill.ok { color: var(--res); }
+.pill.warn { color: var(--warn); }
+.pill.bad { color: var(--err); }
+.stats { display: flex; flex-wrap: wrap; gap: 4px 18px; font-size: 12.5px; color: var(--muted); padding: 8px 0 0; }
+.banner { background: var(--warn-bg); color: var(--warn); border: 1px solid var(--warn); border-radius: 6px; padding: 8px 12px; margin-top: 12px; }
+.newbar { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); z-index: 20; box-shadow: 0 4px 16px rgba(0,0,0,.25); }
+
+/* cards */
+.card { background: var(--card); border: 1px solid var(--line); border-left: 5px solid var(--line); border-radius: 8px; padding: 10px 14px 12px; margin: 12px 0; min-width: 0; }
+.card.err { border-left-color: var(--err); border-left-width: 7px; }
+.chead { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: center; font-size: 13px; color: var(--muted); }
+.chead .id { font-weight: 700; color: var(--ink); }
+.st { font-weight: 600; }
+.st-streaming { color: var(--warn); }
+.st-complete { color: var(--res); }
+.st-aborted { color: var(--err); }
+.badge { background: var(--err); color: var(--card); font-weight: 700; font-size: 12px; padding: 1px 8px; border-radius: 4px; }
+.errs { margin-top: 8px; }
+.err-item { background: var(--err-bg); border-left: 4px solid var(--err); border-radius: 6px; padding: 6px 10px; margin: 6px 0; }
+.err-item .et { font-weight: 700; color: var(--err); }
+
+section { min-width: 0; }
+.sec-title { font-size: 12px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; color: var(--muted); margin: 14px 0 2px; }
+.note { font-size: 12.5px; color: var(--muted); margin-bottom: 4px; }
+.blk { --c: var(--plain); --cbg: var(--plain-bg); border: 1px solid var(--line); border-left: 4px solid var(--c); background: var(--cbg); border-radius: 6px; padding: 8px 10px; margin: 8px 0; min-width: 0; }
+.blk.sys { --c: var(--sys); --cbg: var(--sys-bg); }
+.blk.tools { --c: var(--tools); --cbg: var(--tools-bg); }
+.blk.conv { --c: var(--conv); --cbg: var(--conv-bg); }
+.blk.new { --c: var(--new); --cbg: var(--new-bg); border: 2px solid var(--c); box-shadow: 0 0 0 3px var(--cbg); }
+.blk.call { --c: var(--call); --cbg: var(--call-bg); }
+.blk.res { --c: var(--res); --cbg: var(--res-bg); }
+.blk.err { --c: var(--err); --cbg: var(--err-bg); }
+.blk.warn { --c: var(--warn); --cbg: var(--warn-bg); }
+.tag { font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--c); margin-bottom: 4px; }
+.tag .sub { text-transform: none; letter-spacing: 0; font-weight: 400; color: var(--muted); }
+.blk .blk { margin: 6px 0; }
+.msg { margin: 6px 0; }
+.role { font-size: 11px; font-weight: 700; text-transform: uppercase; color: var(--muted); margin-right: 6px; }
+.name { font-weight: 700; font-family: ui-monospace, Consolas, "Cascadia Mono", monospace; }
+.tool { border-bottom: 1px dashed var(--line); padding: 6px 0; }
+.tool:last-child { border-bottom: 0; }
+.foot { color: var(--muted); font-size: 12px; margin-top: 8px; }
+
+/* monospace text and JSON */
+.txt, .json { font-family: ui-monospace, Consolas, "Cascadia Mono", monospace; font-size: 12.5px; white-space: pre-wrap; overflow-wrap: anywhere; margin: 4px 0; }
+.txt { background: transparent; }
+.jk { color: var(--k); }
+.j-s { color: var(--s); }
+.j-n { color: var(--n); }
+.j-b { color: var(--b); }
+.j-z { color: var(--muted); }
+.json summary { color: var(--ink); }
+.jh { color: var(--muted); }
+
+/* collapsible parts */
+details > summary { cursor: pointer; list-style: none; color: var(--muted); }
+details > summary::-webkit-details-marker { display: none; }
+details > summary::before { content: "\25B8\0020"; }
+details[open] > summary::before { content: "\25BE\0020"; }
+details > summary .when-open { display: none; }
+details[open] > summary .when-open { display: inline; }
+details[open] > summary .when-closed { display: none; }
+
+@media (max-width: 600px) { .wrap { padding: 0 16px 80px; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <h1>Live traffic</h1>
+    <span id="live" class="pill">connecting…</span>
+    <div class="seg" role="group" aria-label="Request view">
+      <button id="m-delta" aria-pressed="true">Delta</button>
+      <button id="m-full" aria-pressed="false">Full</button>
+    </div>
+    <label class="fl">Tool
+      <select id="filter"><option value="all">All</option></select>
+    </label>
+    <button id="pause" aria-pressed="false">Pause</button>
+    <button id="clear">Clear</button>
+  </header>
+  <div class="stats"><span id="sess">Session · 0 exchanges</span><span id="tools">Tool calls · none yet</span></div>
+  <div id="banner" class="banner" hidden>Connection to the proxy was lost. Reconnecting; the list keeps what arrived before the drop.</div>
+  <p id="empty" class="muted">Waiting for traffic. Run the agent with <code>ANTHROPIC_BASE_URL=http://localhost:8041 claude</code>.</p>
+  <main id="list"></main>
+  <button id="newbar" class="newbar" hidden></button>
+</div>
+<script>
+(() => {
+'use strict';
+
+const $ = id => document.getElementById(id);
+const S = {
+  ex: [],              // exchanges in view, ascending by id; the list renders newest first
+  byId: new Map(),
+  results: new Map(),  // tool_use_id -> tool_result block (kept across Clear so later joins still work)
+  owners: new Map(),   // tool_use_id -> exchange id that made the call
+  names: new Map(),    // tool_use_id -> tool name
+  seen: new Set(),     // tool_use_ids whose result has already been processed
+  last: null,          // previous exchange in view: the baseline for the delta
+  dirty: new Set(),    // exchange ids to re-render on the next frame
+  ui: new Map(),       // open/closed state of <details>, keyed by path, so re-renders keep it
+  mode: 'delta', filter: 'all', paused: false, queued: 0,
+  state: 'connecting', // connecting | live | lost
+  instance: null, fresh: 0, raf: 0, toolKey: '',
+};
+
+// ---------- small DOM helpers (text only, never innerHTML) ----------
+
+function h(tag, cls, ...kids) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  for (const k of kids) if (k !== null && k !== undefined && k !== false) e.append(k instanceof Node ? k : String(k));
+  return e;
+}
+function det(key, open, summary, body) {
+  const d = h('details');
+  d.open = S.ui.has(key) ? S.ui.get(key) : open;
+  d.addEventListener('toggle', () => S.ui.set(key, d.open));
+  d.append(h('summary', null, summary), ...body);
+  return d;
+}
+function num(v) { return v === null || v === undefined ? '–' : Number(v).toLocaleString(); }
+function fmtMs(ms) {
+  if (ms < 1000) return Math.round(ms) + ' ms';
+  if (ms < 60000) return (ms / 1000).toFixed(1) + ' s';
+  return Math.floor(ms / 60000) + 'm ' + Math.round((ms % 60000) / 1000) + 's';
+}
+function contentText(c) {
+  if (typeof c === 'string') return c;
+  if (Array.isArray(c)) return c.map(b => (b && typeof b.text === 'string') ? b.text : JSON.stringify(b)).join('\n');
+  return JSON.stringify(c) ?? '';
+}
+
+// ---------- long text and JSON ----------
+
+// Long text (> 20 lines or > 2000 chars) is collapsed with a show-more control and its size.
+function text(s, key, full) {
+  s = String(s ?? '');
+  const pre = h('pre', 'txt', s);
+  const lines = s.split('\n').length;
+  if (full || (lines <= 20 && s.length <= 2000)) return pre;
+  return det(key, false,
+    h('span', null, h('span', 'when-closed', 'show more'), h('span', 'when-open', 'show less'),
+      ` · ${lines} lines · ${s.length.toLocaleString()} chars`),
+    [pre]);
+}
+function jprim(v) {
+  const t = v === null ? 'z' : typeof v === 'string' ? 's' : typeof v === 'number' ? 'n' : typeof v === 'boolean' ? 'b' : 'z';
+  return h('span', 'j-' + t, JSON.stringify(v) ?? 'undefined');
+}
+// Pretty JSON with 2-space indentation; every object/array can be folded.
+function jsonNode(v, key, pad = '', name = null, comma = '') {
+  const isArr = Array.isArray(v);
+  const isObj = v !== null && typeof v === 'object';
+  const lead = name === null ? [] : [h('span', 'jk', JSON.stringify(name)), ': '];
+  const keys = isObj ? (isArr ? v.map((_, i) => i) : Object.keys(v)) : [];
+  if (!keys.length) {
+    const val = isObj ? h('span', 'j-z', isArr ? '[]' : '{}') : jprim(v);
+    return h('div', null, pad, ...lead, val, comma);
+  }
+  const close = isArr ? ']' : '}';
+  const kids = keys.map((k, i) => jsonNode(v[k], `${key}/${k}`, pad + '  ', isArr ? null : k, i < keys.length - 1 ? ',' : ''));
+  const summary = h('span', null, pad, ...lead, isArr ? '[' : '{',
+    h('span', 'when-closed jh', ` ${keys.length} ${isArr ? 'items' : 'keys'} ${close}${comma}`));
+  return det(key, true, summary, [...kids, h('div', null, pad, close, comma)]);
+}
+function jsonRoot(v, key) { return h('div', 'json', jsonNode(v, key)); }
+
+// ---------- message and content rendering ----------
+
+// kind picks the colour; full = never collapse (the new message).
+function block(b, key, kind, full) {
+  if (!b || typeof b !== 'object') return jsonRoot(b, key);
+  switch (b.type) {
+    case 'text':
+      return blk(kind, 'text', '', text(b.text, key, full));
+    case 'tool_use':
+      return blk('call', 'tool call', '', h('div', 'name', b.name), h('div', 'muted', 'id ' + b.id),
+        jsonRoot(b.input ?? {}, key + '/in'));
+    case 'tool_result': {
+      const k = b.is_error ? 'err' : 'res';
+      return blk(k, b.is_error ? 'tool result · ERROR' : 'tool result', '',
+        h('div', 'muted', 'answers ' + b.tool_use_id), content(b.content ?? '', key + '/out', k, full));
+    }
+    case 'image':
+      return blk(kind, 'image', '', h('div', 'muted', '[image omitted]'));
+    default:
+      return blk(kind, String(b.type ?? 'block'), '', jsonRoot(b, key));
+  }
+}
+function content(c, key, kind, full) {
+  if (typeof c === 'string') return text(c, key, full);
+  if (Array.isArray(c)) return h('div', null, ...c.map((b, i) => block(b, `${key}/${i}`, kind, full)));
+  return jsonRoot(c, key);
+}
+function blk(kind, label, sub, ...kids) {
+  return h('div', 'blk ' + kind, h('div', 'tag', label, sub ? h('span', 'sub', '  ' + sub) : null), ...kids);
+}
+function msgNode(m, key, kind, full) {
+  const role = (m && m.role) || '?';
+  return h('div', 'msg', h('span', 'role', role), content(m && m.content !== undefined ? m.content : '', key, kind, full));
+}
+
+// ---------- request: four labelled sections, delta or full ----------
+
+function reqNode(ex, mode) {
+  const key = 'e' + ex.id;
+  const sec = h('section', 'req');
+  const n = ex.msgs.length;
+  const hasMsgs = !!(ex.body && Array.isArray(ex.body.messages));
+  let start = 0, note;
+  if (!hasMsgs) note = 'Not a Messages API request.';
+  else if (mode === 'full') note = `Full view: all ${n} message(s).`;
+  else if (!ex.prev) note = 'First request in this view: full history.';
+  else if (ex.base < 0) note = `History changed since #${ex.prev.id}: full request shown.`;
+  else { start = ex.base; note = `Delta: ${n - start} message(s) added since #${ex.prev.id}.`; }
+  sec.append(h('div', 'sec-title', `Request · ${ex.method} ${ex.path}`), h('div', 'note', note));
+
+  if (ex.raw !== null) sec.append(blk('plain', 'raw body · not JSON', '', text(ex.raw, key + '/raw', true)));
+  if (ex.orphans.length) {
+    sec.append(blk('warn', 'warning · orphan tool result', '',
+      ...ex.orphans.map(id => h('div', 'muted', `tool_result ${id} matches no tool call in this view`))));
+  }
+  if (hasMsgs) {
+    const sys = ex.body.system;
+    const sysText = typeof sys === 'string' ? sys
+      : Array.isArray(sys) ? sys.map(b => (b && b.type === 'text') ? b.text : JSON.stringify(b)).join('\n\n') : '';
+    const sysLines = sysText.split('\n').length;
+    sec.append(blk('sys', 'System', sysText ? `${sysLines} line${sysLines === 1 ? '' : 's'}` : '',
+      sysText ? text(sysText, key + '/sys') : h('div', 'muted', '(no system prompt)')));
+
+    const tools = Array.isArray(ex.body.tools) ? ex.body.tools : [];
+    sec.append(blk('tools', 'Tools', `${tools.length}`,
+      ...(tools.length
+        ? tools.map((t, i) => {
+            t = t || {};
+            return h('div', 'tool', h('div', 'name', t.name ?? '(unnamed)'),
+              t.description ? text(t.description, `${key}/td${i}`) : null,
+              det(`${key}/ts${i}`, false, 'input schema', [jsonRoot(t.input_schema ?? {}, `${key}/ti${i}`)]));
+          })
+        : [h('div', 'muted', '(no tools)')])));
+
+    const conv = ex.msgs.slice(start, n - 1);
+    sec.append(blk('conv', 'Conversation', `${conv.length} earlier message(s)`,
+      ...(conv.length ? conv.map((m, i) => msgNode(m, `${key}/c${start + i}`, 'conv', false))
+                      : [h('div', 'muted', '(none)')])));
+
+    if (n) {
+      const last = ex.msgs[n - 1];
+      sec.append(blk('new', 'New message', (last && last.role) || '', msgNode(last, `${key}/new`, 'new', true)));
+    }
+  }
+  sec.append(det(`${key}/hdr`, false, 'headers (secrets redacted)',
+    [h('pre', 'txt', ex.headers.map(([k, v]) => `${k}: ${v}`).join('\n'))]));
+  return sec;
+}
+
+// ---------- reply: text, tool calls with their results beside them, footer ----------
+
+function replyNode(ex) {
+  const key = 'e' + ex.id, r = ex.resp;
+  const sec = h('section', 'reply', h('div', 'sec-title', 'Reply'));
+  if (!r) { sec.append(h('div', 'pending', 'waiting for the reply…')); return sec; }
+  if (r.text) sec.append(blk('plain', 'text', '', text(r.text, key + '/text')));
+  (r.tool_calls || []).forEach((c, i) => {
+    const res = S.results.get(c.id);
+    let input;
+    if (c.input && typeof c.input === 'object') input = jsonRoot(c.input, `${key}/rc${i}`);
+    else input = h('div', null, h('div', 'muted', 'input not complete yet'), h('pre', 'txt', String(c.input ?? '')));
+    const result = res
+      ? blk(res.is_error ? 'err' : 'res', res.is_error ? 'tool result · ERROR' : 'tool result', '',
+          content(res.content ?? '', `${key}/rr${i}`, res.is_error ? 'err' : 'res', false))
+      : h('div', 'pending', 'PENDING · no result yet');
+    sec.append(blk('call', 'tool call', '', h('div', 'name', c.name), h('div', 'muted', 'id ' + c.id), input, result));
+  });
+  const u = r.usage || {};
+  const cache = u.cache_read_input_tokens != null || u.cache_creation_input_tokens != null
+    ? ` · cache read ${num(u.cache_read_input_tokens)} · cache write ${num(u.cache_creation_input_tokens)}` : '';
+  sec.append(h('div', 'foot', `stop reason: ${r.stop_reason ?? '–'} · input ${num(u.input_tokens)} · output ${num(u.output_tokens)}` + cache));
+  return sec;
+}
+
+// ---------- card ----------
+
+const hasErr = ex => !!(ex.bodyError || (ex.resp && ex.resp.error) || ex.toolErrs.length);
+
+function headerNode(ex) {
+  const r = ex.resp, u = (r && r.usage) || {};
+  const state = r ? r.state : 'pending';
+  const dur = r && r.ended_at ? fmtMs(r.ended_at - ex.t) : (r ? 'running' : '–');
+  return h('header', 'chead',
+    h('span', 'id', '#' + ex.id),
+    h('span', null, new Date(ex.t).toLocaleTimeString()),
+    h('span', 'st st-' + state, `${r && r.status ? r.status : '…'} · ${state}`),
+    h('span', null, 'duration ' + dur),
+    h('span', null, `in ${num(u.input_tokens)} · out ${num(u.output_tokens)} tokens`),
+    hasErr(ex) ? h('span', 'badge', 'ERROR') : null);
+}
+function errorsNode(ex) {
+  const item = (title, msg, body) => h('div', 'err-item', h('div', 'et', title),
+    msg ? h('div', null, msg) : null, body ? h('pre', 'txt', String(body).slice(0, 500)) : null);
+  const items = [];
+  if (ex.bodyError) items.push(item('invalid request JSON', 'The request body did not parse. The raw text is shown in the request.'));
+  const e = ex.resp && ex.resp.error;
+  if (e) items.push(item(`${e.type}${e.status ? ' · status ' + e.status : ''}`, e.message, e.body));
+  for (const t of ex.toolErrs) items.push(item(`tool error · ${t.name || 'unknown tool'}`, 'tool_use ' + t.id, t.text));
+  return items.length ? h('div', 'errs', ...items) : '';
+}
+function match(ex) {
+  if (S.filter === 'all') return true;
+  const r = ex.resp;
+  return !!(r && (r.tool_calls || []).some(c => c.name === S.filter)) || ex.newRes.some(id => S.names.get(id) === S.filter);
+}
+function fill(ex) {
+  const req = ex.cache[S.mode] || (ex.cache[S.mode] = reqNode(ex, S.mode));
+  ex.el.className = 'card' + (hasErr(ex) ? ' err' : '');
+  ex.el.replaceChildren(headerNode(ex), errorsNode(ex), req, replyNode(ex));
+  ex.el.hidden = !match(ex);
+}
+
+// ---------- model: requests, replies, tool-result joins ----------
+
+function addRequest(m) {
+  if (S.byId.has(m.id)) return;
+  const body = m.body && typeof m.body === 'object' ? m.body : null;
+  const msgs = body && Array.isArray(body.messages) ? body.messages : [];
+  const ex = {
+    id: m.id, t: m.started_at, method: m.method, path: m.path, headers: m.headers || [],
+    body, raw: m.body_raw ?? null, bodyError: !!m.body_error,
+    msgs, mk: msgs.map(x => JSON.stringify(x)),
+    prev: S.last, base: -1, resp: null, toolErrs: [], orphans: [], newRes: [], el: null, cache: {},
+  };
+  // Delta baseline: index where the previous request's messages stop being a prefix of this one, or -1.
+  const pk = S.last && S.last.body && Array.isArray(S.last.body.messages) ? S.last.mk : null;
+  if (pk && pk.length <= ex.mk.length && pk.every((x, i) => x === ex.mk[i])) ex.base = pk.length;
+
+  // A tool_result answers a call from an earlier reply. Each id is processed once, where it first appears.
+  for (const msg of msgs) {
+    if (!msg || !Array.isArray(msg.content)) continue;
+    for (const b of msg.content) {
+      if (!b || b.type !== 'tool_result' || S.seen.has(b.tool_use_id)) continue;
+      const id = b.tool_use_id;
+      S.seen.add(id);
+      S.results.set(id, b);
+      ex.newRes.push(id);
+      if (!S.names.has(id)) ex.orphans.push(id);
+      if (b.is_error) ex.toolErrs.push({ id, name: S.names.get(id), text: contentText(b.content).slice(0, 500) });
+      if (S.owners.has(id)) S.dirty.add(S.owners.get(id));
+    }
+  }
+  S.byId.set(ex.id, ex);
+  S.ex.push(ex);
+  S.last = ex;
+  S.dirty.add(ex.id);
+}
+function setReply(m) {
+  // Index even when the exchange is not in view (after Clear), so later results still join.
+  for (const c of m.response.tool_calls || []) {
+    S.owners.set(c.id, m.id);
+    S.names.set(c.id, c.name);
+  }
+  const ex = S.byId.get(m.id);
+  if (!ex) return;
+  ex.resp = m.response;
+  S.dirty.add(ex.id);
+}
+
+// ---------- rendering loop: one frame at a time, paused = model updates but no DOM ----------
+
+function schedule() {
+  if (!S.raf && !S.paused) S.raf = requestAnimationFrame(flush);
+}
+function flush() {
+  S.raf = 0;
+  if (S.paused) return;
+  const list = $('list');
+  for (const ex of S.ex) {
+    if (ex.el) continue;
+    ex.el = h('article');
+    if (window.scrollY > 120) S.fresh++;  // user is reading lower down: count instead of moving the view
+    list.prepend(ex.el);
+    S.dirty.add(ex.id);
+  }
+  for (const id of S.dirty) {
+    const ex = S.byId.get(id);
+    if (!ex || !ex.el) continue;
+    try { fill(ex); } catch (err) { console.error('render failed for #' + id, err); }
+  }
+  S.dirty.clear();
+  renderTop();
+}
+function applyFilter() {
+  for (const ex of S.ex) if (ex.el) ex.el.hidden = !match(ex);
+}
+function renderTop() {
+  let inT = 0, outT = 0, dSum = 0, dN = 0;
+  const counts = new Map();
+  for (const ex of S.ex) {
+    const r = ex.resp;
+    if (!r) continue;
+    inT += (r.usage && r.usage.input_tokens) || 0;
+    outT += (r.usage && r.usage.output_tokens) || 0;
+    if (r.ended_at) { dSum += r.ended_at - ex.t; dN++; }
+    for (const c of r.tool_calls || []) counts.set(c.name, (counts.get(c.name) || 0) + 1);
+  }
+  $('sess').textContent = `Session · ${S.ex.length} exchange(s) · input ${inT.toLocaleString()} tokens · output ${outT.toLocaleString()} tokens · avg duration ${dN ? fmtMs(dSum / dN) : '–'}`;
+  $('tools').textContent = counts.size
+    ? 'Tool calls · ' + [...counts].map(([k, v]) => `${k} ×${v}`).join(' · ')
+    : 'Tool calls · none yet';
+
+  const names = [...new Set(S.names.values())].sort();
+  if (names.join('\n') !== S.toolKey) {
+    S.toolKey = names.join('\n');
+    const sel = $('filter');
+    sel.replaceChildren(new Option('All', 'all'), ...names.map(n => new Option(n, n)));
+    sel.value = names.includes(S.filter) ? S.filter : 'all';
+    if (sel.value !== S.filter) { S.filter = 'all'; applyFilter(); }
+  }
+  $('empty').hidden = S.ex.length > 0;
+  $('newbar').hidden = !S.fresh;
+  $('newbar').textContent = `${S.fresh} new — jump to top`;
+  renderPill();
+}
+function renderPill() {
+  const p = $('live');
+  if (S.state === 'lost') { p.textContent = '↻ reconnecting'; p.className = 'pill bad'; }
+  else if (S.state === 'connecting') { p.textContent = '… connecting'; p.className = 'pill'; }
+  else if (S.paused) { p.textContent = `❚❚ paused · ${S.queued} queued`; p.className = 'pill warn'; }
+  else { p.textContent = '● live'; p.className = 'pill ok'; }
+  $('banner').hidden = S.state !== 'lost';
+  $('pause').textContent = S.paused ? 'Resume' : 'Pause';
+  $('pause').setAttribute('aria-pressed', String(S.paused));
+}
+function clearView() {
+  S.ex = []; S.byId.clear(); S.dirty.clear(); S.last = null; S.fresh = 0;
+  $('list').replaceChildren();
+  renderTop();
+}
+function resetAll() {  // the proxy restarted: ids start again, so drop everything, including indexes
+  clearView();
+  S.results.clear(); S.owners.clear(); S.names.clear(); S.seen.clear(); S.ui.clear();
+}
+
+// ---------- wiring ----------
+
+function onMsg(e) {
+  let m;
+  try { m = JSON.parse(e.data); } catch { return; }
+  try {
+    if (m.type === 'hello') {
+      if (S.instance && S.instance !== m.instance) resetAll();
+      S.instance = m.instance;
+      return;
+    }
+    if (S.paused && m.type === 'request') { S.queued++; renderPill(); }
+    if (m.type === 'request') addRequest(m);
+    else if (m.type === 'reply') setReply(m);
+    schedule();
+  } catch (err) { console.error(err); }
+}
+function setMode(mode) {
+  S.mode = mode;
+  $('m-delta').setAttribute('aria-pressed', String(mode === 'delta'));
+  $('m-full').setAttribute('aria-pressed', String(mode === 'full'));
+  for (const ex of S.ex) S.dirty.add(ex.id);
+  schedule();
+}
+
+$('m-delta').onclick = () => setMode('delta');
+$('m-full').onclick = () => setMode('full');
+$('filter').onchange = e => { S.filter = e.target.value; applyFilter(); renderTop(); };
+$('pause').onclick = () => {
+  S.paused = !S.paused;
+  if (!S.paused) { S.queued = 0; schedule(); }
+  renderPill();
+};
+$('clear').onclick = clearView;
+$('newbar').onclick = () => { window.scrollTo({ top: 0 }); S.fresh = 0; renderTop(); };
+window.addEventListener('scroll', () => {
+  if (S.fresh && window.scrollY <= 120) { S.fresh = 0; renderTop(); }
+}, { passive: true });
+
+// EventSource reconnects by itself and sends Last-Event-ID; the proxy replays what was missed.
+const es = new EventSource('/__dashboard/events');
+es.onopen = () => { S.state = 'live'; renderPill(); };
+es.onerror = () => { S.state = 'lost'; renderPill(); };
+es.onmessage = onMsg;
+renderPill();
+})();
+</script>
+</body>
+</html>
