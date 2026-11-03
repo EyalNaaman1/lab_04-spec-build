@@ -86,6 +86,16 @@ section { min-width: 0; }
 .blk.err { --c: var(--err); --cbg: var(--err-bg); }
 .blk.warn { --c: var(--warn); --cbg: var(--warn-bg); }
 .tag { font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--c); margin-bottom: 4px; }
+.tag::before { content: var(--icon, "·") "  "; }
+.blk.sys { --icon: "⚙"; }
+.blk.tools { --icon: "⚒"; }
+.blk.conv { --icon: "☰"; }
+.blk.new { --icon: "★"; }
+.blk.call { --icon: "▶"; }
+.blk.res { --icon: "◀"; }
+.blk.err { --icon: "⚠"; }
+.blk.warn { --icon: "⚠"; }
+.blk.plain { --icon: "¶"; }
 .tag .sub { text-transform: none; letter-spacing: 0; font-weight: 400; color: var(--muted); }
 .blk .blk { margin: 6px 0; }
 .msg { margin: 6px 0; }
@@ -361,10 +371,11 @@ function errorsNode(ex) {
   for (const t of ex.toolErrs) items.push(item(`tool error · ${t.name || 'unknown tool'}`, 'tool_use ' + t.id, t.text));
   return items.length ? h('div', 'errs', ...items) : '';
 }
+// SPEC 5.6: the reply calls the tool, or the request contains a tool_result for a call to that tool.
 function match(ex) {
   if (S.filter === 'all') return true;
   const r = ex.resp;
-  return !!(r && (r.tool_calls || []).some(c => c.name === S.filter)) || ex.newRes.some(id => S.names.get(id) === S.filter);
+  return !!(r && (r.tool_calls || []).some(c => c.name === S.filter)) || ex.resIds.some(id => S.names.get(id) === S.filter);
 }
 function fill(ex) {
   const req = ex.cache[S.mode] || (ex.cache[S.mode] = reqNode(ex, S.mode));
@@ -383,7 +394,7 @@ function addRequest(m) {
     id: m.id, t: m.started_at, method: m.method, path: m.path, headers: m.headers || [],
     body, raw: m.body_raw ?? null, bodyError: !!m.body_error,
     msgs, mk: msgs.map(x => JSON.stringify(x)),
-    prev: S.last, base: -1, resp: null, toolErrs: [], orphans: [], newRes: [], el: null, cache: {},
+    prev: S.last, base: -1, resp: null, toolErrs: [], orphans: [], resIds: [], el: null, cache: {},
   };
   // Delta baseline: index where the previous request's messages stop being a prefix of this one, or -1.
   const pk = S.last && S.last.body && Array.isArray(S.last.body.messages) ? S.last.mk : null;
@@ -393,11 +404,12 @@ function addRequest(m) {
   for (const msg of msgs) {
     if (!msg || !Array.isArray(msg.content)) continue;
     for (const b of msg.content) {
-      if (!b || b.type !== 'tool_result' || S.seen.has(b.tool_use_id)) continue;
+      if (!b || b.type !== 'tool_result') continue;
       const id = b.tool_use_id;
+      ex.resIds.push(id);
+      if (S.seen.has(id)) continue;  // errors and orphans are reported once, where the result first appears
       S.seen.add(id);
       S.results.set(id, b);
-      ex.newRes.push(id);
       if (!S.names.has(id)) ex.orphans.push(id);
       if (b.is_error) ex.toolErrs.push({ id, name: S.names.get(id), text: contentText(b.content).slice(0, 500) });
       if (S.owners.has(id)) S.dirty.add(S.owners.get(id));
