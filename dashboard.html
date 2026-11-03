@@ -105,6 +105,14 @@ section { min-width: 0; }
 .tool:last-child { border-bottom: 0; }
 .foot { color: var(--muted); font-size: 12px; margin-top: 8px; }
 
+/* prompt first, technical details closed */
+.prompt { padding: 4px 0 10px; }
+.prompt-label { font-size: 12px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; color: var(--muted); }
+.prompt-text { font-size: 17px; line-height: 1.55; color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; margin-top: 4px; }
+.tech { margin-top: 8px; border-top: 1px solid var(--line); padding-top: 8px; }
+.tech > summary { font-size: 13px; font-weight: 600; color: var(--ink); padding: 4px 0; }
+.tech > summary .sub { font-weight: 400; color: var(--muted); }
+
 /* monospace text and JSON */
 .txt, .json { font-family: ui-monospace, Consolas, "Cascadia Mono", monospace; font-size: 12.5px; white-space: pre-wrap; overflow-wrap: anywhere; margin: 4px 0; }
 .txt { background: transparent; }
@@ -312,7 +320,8 @@ function reqNode(ex, mode) {
 
     if (n) {
       const last = ex.msgs[n - 1];
-      sec.append(blk('new', 'New message', (last && last.role) || '', msgNode(last, `${key}/new`, 'new', true)));
+      sec.append(blk('new', 'New message', (last && last.role) || '', msgNode(last, `${key}/new`, 'new', true),
+        det(`${key}/rawnew`, false, 'raw JSON', [jsonRoot(last, `${key}/rawnewj`)])));
     }
   }
   sec.append(det(`${key}/hdr`, false, 'headers (secrets redacted)',
@@ -377,10 +386,38 @@ function match(ex) {
   const r = ex.resp;
   return !!(r && (r.tool_calls || []).some(c => c.name === S.filter)) || ex.resIds.some(id => S.names.get(id) === S.filter);
 }
+// SPEC 5.8: header, prompt, errors, then one closed "Technical details" section holding the full breakdown.
+function promptNode(ex) {
+  if (!ex.msgs.length) {  // no messages: a non-JSON or non-Messages request, so show what was sent
+    const raw = ex.raw !== null ? ex.raw.slice(0, 500) : '';
+    return h('div', 'prompt', h('div', 'prompt-label', 'Your prompt'),
+      h('div', 'prompt-text', raw || '(no messages in this request)'));
+  }
+  const last = ex.msgs[ex.msgs.length - 1] || {};
+  const c = last.content;
+  let text = '';
+  if (typeof c === 'string') text = c;
+  else if (Array.isArray(c)) text = c.filter(b => b && b.type === 'text').map(b => b.text ?? '').join('\n\n');
+  if (!text.trim()) {  // no text (e.g. only tool_result blocks): say what the message carries
+    const parts = Array.isArray(c) ? c.map(b => {
+      if (!b) return '[empty]';
+      if (b.type === 'tool_result') return `Tool result for ${b.tool_use_id}${b.is_error ? ' (error)' : ''}`;
+      if (b.type === 'image') return '[image]';
+      return `[${b.type ?? 'block'}]`;
+    }) : [];
+    text = parts.join(' · ') || '(empty message)';
+  }
+  return h('div', 'prompt', h('div', 'prompt-label', 'Your prompt'), h('div', 'prompt-text', text));
+}
 function fill(ex) {
   const req = ex.cache[S.mode] || (ex.cache[S.mode] = reqNode(ex, S.mode));
+  const reply = replyNode(ex);
+  const sections = req.querySelectorAll(':scope > .blk').length + 1;  // + the reply
+  const tech = det(`e${ex.id}/tech`, false,
+    h('span', null, 'Technical details', h('span', 'sub', ` · ${sections} sections`)), [req, reply]);
+  tech.classList.add('tech');
   ex.el.className = 'card' + (hasErr(ex) ? ' err' : '');
-  ex.el.replaceChildren(headerNode(ex), errorsNode(ex), req, replyNode(ex));
+  ex.el.replaceChildren(headerNode(ex), promptNode(ex), errorsNode(ex), tech);
   ex.el.hidden = !match(ex);
 }
 

@@ -78,7 +78,10 @@ Tool results are not in the reply. They arrive in a later request as `tool_resul
 
 - Single page, one column, newest exchange at the top.
 - Each exchange is a card with a header line: `#id`, time, status, duration, input/output tokens, and any error badge.
-- Inside each card, two blocks in order: **Request**, then **Reply**.
+- Inside each card, in this order (see §5.8):
+  1. **Prompt**: the user's actual prompt, in large text, at the very top of the card. Always visible.
+  2. **Errors**: the error section, if any. Always visible, directly under the prompt.
+  3. **Technical details**: one collapsible `<details>` section, **closed by default**, containing the full breakdown: the **Request** blocks (§5.2), then the **Reply** (§5.3).
 - A top bar holds: title, live/paused indicator, **Delta / Full** toggle, tool-name filter, and a clear button (clears the in-memory list in the browser view only).
 - Must be usable at 1280px wide and not break below that.
 
@@ -92,6 +95,20 @@ The request is split into four labelled sections, each with a distinct color and
 4. **New message** — the last element of the `messages` array, always shown in full, never collapsed, visually emphasized.
 
 **Delta definition:** compare the current request's `messages` array with the previous exchange's `messages` array. If the previous array is a prefix of the current one, the delta is the elements after that prefix. If not, show the full request and label it "history changed".
+
+### 5.8 Card layout: prompt first, details collapsed
+
+Goal: a participant reads the card at a glance and only opens the technical view when needed.
+
+- **Prompt block (top of card, always visible).**
+  - Shows the text content of the New message (the last element of `messages`): all its `text` blocks, in order, joined with a blank line; or the string content if the message content is a plain string.
+  - Shown in large, clear sans-serif text (at least 16px), with line breaks preserved and long lines wrapped. Never collapsed, regardless of length.
+  - Labelled "Your prompt". If the New message has no text (for example, it only carries `tool_result` blocks), show a short summary instead, such as `Tool result for toolu_… (error)` or `[image]`, so the block is never empty.
+- **Technical details (closed by default).**
+  - One `<details>` element with the summary "Technical details", showing the number of sections it holds.
+  - Expanding it shows exactly the design in §5.2 and §5.3: System, Tools, Conversation, New message, then Reply (text, tool calls with results, footer).
+  - Inside the New message section, the raw message JSON is available as its own collapsed `<details>` block ("raw JSON"), in addition to the labelled rendering.
+- **State.** Whether the technical details are open is remembered for each card across live updates, Delta/Full changes and filtering.
 
 ### 5.3 Reply breakdown
 
@@ -131,7 +148,7 @@ No cost figures.
 
 ## 6. Errors
 
-An exchange is flagged as an error (red badge, red left border, error section at the top of the card) when any of these occur:
+An exchange is flagged as an error (red badge, red left border, error section directly under the prompt, §5.8) when any of these occur:
 
 1. **HTTP error:** response status is 400 or higher.
 2. **Tool error:** a `tool_result` in the request has `is_error: true`. The error is shown on the matching tool call.
